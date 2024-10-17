@@ -96,47 +96,76 @@ def similarity_search_with_threshold(product_keywords, threshold=0.8):
 llm = OllamaLLM(model="llama3")
 
 prompt_template = """
-You are a sales assistant for home automation products. Based on the customer's requirements and budget, generate a detailed sales quotation that includes three tiers: Normal, Good, and Best.
+You are an intelligent assistant tasked with suggesting the most appropriate products for a home on room requirements. I will provide the requirements for each room, and you will select the best products from the provided product catalog.
 
-**Customer Requirements**:
-- Budget: {budget}
-- Requirements per room:
+### Task:
+1. For each room, select the most appropriate product(s) from the provided catalog based on the room’s requirement.
+2. If an exact match for the requirement is not found:
+   - Look for related categories or subcategories.
+   - Use the short description and long description to match a product that fits the room's needs.
+   - Ensure the products you choose fulfill the functional requirement of the room (e.g., select a product from the "Television" or "Entertainment" category for the "Outdoor TV" requirement, even if it's not labeled exactly as "Outdoor TV").
+
+### Room Requirements:
 {room_requirements}
 
-For each room, search the product catalog and find relevant products that match the customer’s requirements. The available product list is provided below. Ensure that the products you select fit within the specified budget for each of the three tiers.
-
-### Available Products:
+### Product Catalog:
 {available_products}
 
 ### Output:
-Please generate the sales quotation in an HTML-compatible tabular format that includes:
-- Room
-- Manufacturer
-- Model or Part Number
-- Product Name
-- Quantity
-- Unit Price (in Pounds)
-- Total Price (in Pounds)
+1. For each room, suggest the most appropriate product(s) from the catalog.
+2. Provide the room name, the product name, its category, subcategory, short description, and the reason for selecting it if it's not an exact match to the room requirement.
+3. Output the final result in the following structured JSON format:
 
-Ensure that the output is returned as valid HTML code.
+```json
+{{
+  "rooms": {{
+    "Dining": {{
+      "requirement": "TV",
+      "product": {{
+        "name": "Product Name",
+        "category": "Category",
+        "subcategory": "Subcategory",
+        "short_description": "Short Description",
+        "long_description": "Long Description",
+        "reason": "Reason for selection if not an exact match"
+      }}
+    }}
+    // Repeat for all rooms...
+  }}
+}}
+
 """
-
 
 # Step 6: Process the query
 
 
 def process_query(query, budget):
     # Extract product keywords from the query
-    product_keywords = extract_product_keywords(query)
+    # product_keywords = extract_product_keywords(query)
 
     # Perform similarity search based on the extracted keywords
-    relevant_products = similarity_search_with_threshold(product_keywords)
-    # Format relevant products into a string for the prompt
-    available_products = relevant_products.to_string(index=False)
+    # relevant_products = similarity_search_with_threshold(product_keywords)
+    # # Format relevant products into a string for the prompt
+    # available_products = relevant_products.to_string(index=False)
+
+    product_list_str = ''
+    for index, row in product_catalog.iterrows():
+        product = "Item: {}, Manufacturer: {}, Model: {}, Category: {}, Subcategory: {}, Part Number: {}, Description: {}, Price: {}".format(
+            index + 1,
+            row['Manufacturer'],
+            row['Model'],
+            row['Category'],
+            row['Subcategory'],
+            row['Part Number'],
+            row['Short Description'],
+            row['Unit Price']
+        )
+        product_list_str += product + '\n'
 
     room_requirements = "\n".join(
-        [f"- {room}: {products}" for room, products in query.items() if room not in ["budget", "email", "timestamp"]])
+        [f"- In **{room}**: Following items are needed to be installed : {products}" for room, products in query.items() if room not in ["budget", "email", "timestamp"] and products is not None])
 
+    print(room_requirements)
     # Generate the prompt
     prompt = ChatPromptTemplate.from_template(prompt_template)
     chain = prompt | llm
@@ -145,11 +174,11 @@ def process_query(query, budget):
     answer = chain.invoke({
         "budget": budget,
         "room_requirements": room_requirements,
-        "available_products": available_products
+        "available_products": product_list_str
     })
 
     print(answer)
-    send_html_email(query['email'], "Sales Quote for Home Automation", answer)
+    # send_html_email(query['email'], "Sales Quote for Home Automation", answer)
 
     return answer
 

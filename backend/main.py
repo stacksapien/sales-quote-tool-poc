@@ -38,10 +38,21 @@ def invoke_sagemaker_model(input_text):
 # Define the SageMaker endpoint
         SAGEMAKER_ENDPOINT = "jumpstart-dft-llama-3-1-8b-instruct-20241017-231713"
 
-        print(input_text)
         # Prepare the payload for SageMaker
         payload = json.dumps({
-            "inputs": f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{input_text}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+            "inputs": (
+                "<|begin_of_text|>"
+                "<|start_header_id|>system<|end_header_id|>\n\n"
+                "You are a state-of-the-art sales assistant for Speaker Selling. Based on the customer's requirements, budget, and room specifications, generate a detailed sales quotation that includes three tiers: Basic, Premium, and Ultimate.<|eot_id|>\n\n"
+                "<|start_header_id|>user<|end_header_id|>\n\n"
+                f"{input_text}<|eot_id|>\n\n"
+                "<|start_header_id|>assistant<|end_header_id|>\n\n"
+            ),
+            "parameters": {
+                "max_new_tokens": 3096,  # Increased token limit for larger outputs
+                "top_p": 0.9,
+                "temperature": 0.6
+            }
 
         })
 
@@ -295,42 +306,37 @@ def process_query(query, budget):
 
     # Invoke SageMaker model for the response
     answer = invoke_sagemaker_model(prompt_input)
-    print(f"Found initial response: {answer}")
+    # print(f"Found initial response: {answer}")
 
-    return {}
+    # if answer:
+    #     # Clean and parse the response
+    #     prompt_cleaning_input = response_cleaning_template.format(
+    #         response=answer)
+    #     cleaned_response = invoke_sagemaker_model(prompt_cleaning_input)
 
-    if answer:
-        # Clean and parse the response
-        prompt_cleaning_input = response_cleaning_template.format(
-            response=answer)
-        cleaned_response = invoke_sagemaker_model(prompt_cleaning_input)
+    #     if cleaned_response:
+    json_response = json.loads(answer)
+    print("FOUND JSON", json_response)
+    # Load JSON data
+    data = json_response
 
-        if cleaned_response:
-            json_response = json.loads(cleaned_response)
-            print("FOUND JSON", json_response)
-            # Load JSON data
-            data = json.loads(json_response)
+    # Setup Jinja2 environment
+    file_loader = FileSystemLoader('.')
+    env = Environment(loader=file_loader)
 
-            # Setup Jinja2 environment
-            file_loader = FileSystemLoader('.')
-            env = Environment(loader=file_loader)
+    # Load the template
+    template = env.get_template('template.html')
 
-            # Load the template
-            template = env.get_template('template.html')
+    # Render the template with dynamic data
+    output = template.render(client_name=data['client_name'],
+                             client_email=data['client_email'],
+                             client_address=data['client_address'],
+                             type_of_build=data['type_of_build'],
+                             budgets=data['budgets'])
 
-            # Render the template with dynamic data
-            output = template.render(client_name=data['client_name'],
-                                     client_email=data['client_email'],
-                                     client_address=data['client_address'],
-                                     type_of_build=data['type_of_build'],
-                                     budgets=data['budgets'])
-
-            send_html_email(
-                query['email'], "Sales Quote for Home Automation", output)
-            return json_response
-    else:
-        raise HTTPException(
-            status_code=500, detail="Error generating response from SageMaker")
+    send_html_email(
+        query['email'], "Sales Quote for Home Automation", output)
+    return json_response
 
 
 load_dotenv()

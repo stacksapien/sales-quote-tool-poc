@@ -43,13 +43,13 @@ def invoke_sagemaker_model(input_text):
             "inputs": (
                 "<|begin_of_text|>"
                 "<|start_header_id|>system<|end_header_id|>\n\n"
-                "You are a state-of-the-art sales assistant for Speaker Selling. Based on the customer's requirements, budget, and room specifications, generate a detailed sales quotation that includes three tiers: Basic, Premium, and Ultimate.<|eot_id|>\n\n"
+                "You are a state-of-the-art sales assistant for Speaker Selling. Based on the customer's requirements, budget, and room specifications, generate a detailed sales quotation that includes three tiers: Good, Better, and Best.<|eot_id|>\n\n"
                 "<|start_header_id|>user<|end_header_id|>\n\n"
                 f"{input_text}<|eot_id|>\n\n"
                 "<|start_header_id|>assistant<|end_header_id|>\n\n"
             ),
             "parameters": {
-                "max_new_tokens": 3096,  # Increased token limit for larger outputs
+                "max_new_tokens": 30096,  # Increased token limit for larger outputs
                 "top_p": 0.9,
                 "temperature": 0.6
             }
@@ -152,7 +152,7 @@ llm = OllamaLLM(model="llama3")
 
 
 prompt_template = """
-You are a state-of-the-art sales assistant for Speaker Selling. Based on the customer's requirements, budget, and room specifications, generate a detailed sales quotation that includes three tiers: Basic, Premium, and Ultimate.
+You are a state-of-the-art sales assistant for Speaker Selling. Based on the customer's requirements, budget, and room specifications, generate a detailed sales quotation that includes three tiers: Good, Better, and Best.
 
 **Customer Details**:
 - **Name**: {client_name}
@@ -167,19 +167,19 @@ You are a state-of-the-art sales assistant for Speaker Selling. Based on the cus
 
 **Budget Tiers**:
 
-- **Basic**:
+- **Good**:
   - Recommend essential products that meet the minimum requirements while strictly staying within the budget.
   - Ensure the product type matches the room requirements, especially for wall-mounted speakers or specific configurations.
   - Carefully review the long descriptions to identify products with the necessary features.
 
-- **Premium**:
+- **Better**:
   - Provide cost-effective options that enhance quality and functionality.
   - Consider higher-rated (rating) products and balance cost with budget.
   - Calculate and suggest the correct quantity of speakers needed for each room based on room size and acoustic needs.
   - Ensure the total cost fits within the budget.
   - Thoroughly check long descriptions and product category, sub-category and type of product to ensure feature requirements.
 
-- **Ultimate**:
+- **Best**:
   - Offer the best available products that maximize quality and features.
   - Include top-rated (High Rating) items optimal setup.
   - Calculate and suggest the correct quantity of speakers needed for each room based on room size and acoustic needs.
@@ -222,7 +222,7 @@ You are a state-of-the-art sales assistant for Speaker Selling. Based on the cus
   "type_of_build": "Customer's requested build (e.g., New Build, Condo, Retrofit)",
   "budgets": [
     {{
-      "type": "Basic",
+      "type": "Good",
       "rooms": {{
         "Room Name": {{
           "requirement": "Requirement (e.g., Wall, Ceiling, Floor, Hidden or Number of Speakers type)",
@@ -245,7 +245,7 @@ You are a state-of-the-art sales assistant for Speaker Selling. Based on the cus
         // Repeat for each room
       }}
     }},
-    // Repeat for "Premium" and "Ultimate" budget tiers
+    // Repeat for "Better" and "Best" budget tiers
   ]
 }}
 ** NOTE : MAKE SURE NO TEXT IS RESPONDED UNDER JSON OUTPUT**

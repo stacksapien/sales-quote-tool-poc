@@ -278,6 +278,9 @@ def send_html_email(recipient, subject, body_html, aws_region="eu-north-1"):
         print(f"Error: {e}")
 
 
+llm = OllamaLLM(model="llama3")
+
+
 def process_query(query, budget):
     relevant_keywords = json.dumps(query)
     room_requirements = "\n".join(
@@ -292,19 +295,42 @@ def process_query(query, budget):
     # Format the retrieved documents into a string
     available_products = '\n'.join([doc.page_content for doc in relevant_docs])
 
+    prompt = ChatPromptTemplate.from_template(prompt_template)
+
+    chain = prompt | llm
+
+    answer = chain.invoke({
+        "client_name": query["client_name"],
+        "client_address": query["client_address"],
+        "email": query["email"],
+        "type_of_build": query["type_of_build"],
+        "requirements": room_requirements_,
+        "budget": budget,
+        "available_products": available_products
+    })
+
+    prompt = ChatPromptTemplate.from_template(response_cleaning_template)
+    chain = prompt | llm
+
+    json_response = chain.invoke({
+        "response": answer
+    })
+
+    print(json_response)
+
     # Prepare the input text for SageMaker
-    prompt_input = prompt_template.format(
-        client_name=query["client_name"],
-        client_address=query["client_address"],
-        email=query["email"],
-        type_of_build=query["type_of_build"],
-        requirements=room_requirements_,
-        budget=budget,
-        available_products=available_products
-    )
+    # prompt_input = prompt_template.format(
+    #     client_name=query["client_name"],
+    #     client_address=query["client_address"],
+    #     email=query["email"],
+    #     type_of_build=query["type_of_build"],
+    #     requirements=room_requirements_,
+    #     budget=budget,
+    #     available_products=available_products
+    # )
 
     # Invoke SageMaker model for the response
-    answer = invoke_sagemaker_model(prompt_input)
+    # answer = invoke_sagemaker_model(prompt_input)
     # print(f"Found initial response: {answer}")
 
     # if answer:
@@ -314,7 +340,7 @@ def process_query(query, budget):
     #     cleaned_response = invoke_sagemaker_model(prompt_cleaning_input)
 
     #     if cleaned_response:
-    json_response = json.loads(answer)
+    json_response = json.loads(json_response)
     print("FOUND JSON", json_response)
     # Load JSON data
     data = json_response

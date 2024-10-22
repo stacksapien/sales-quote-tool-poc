@@ -364,6 +364,7 @@ def process_query(query, budget):
     #     cleaned_response = invoke_sagemaker_model(prompt_cleaning_input)
 
     #     if cleaned_response:
+    print(answer)
     json_response = json.loads(answer)
     # Load JSON data
     data = json_response

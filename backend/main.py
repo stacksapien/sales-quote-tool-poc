@@ -25,6 +25,12 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 import boto3
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
+from openai import OpenAI
+
+
+load_dotenv()
+
+gptClient = OpenAI()
 
 
 # Define the function to invoke SageMaker model
@@ -36,7 +42,7 @@ def invoke_sagemaker_model(input_text):
             'sagemaker-runtime', region_name="us-east-1")
 
 # Define the SageMaker endpoint
-        SAGEMAKER_ENDPOINT = "jumpstart-dft-llama-3-1-8b-instruct-20241017-231713"
+        SAGEMAKER_ENDPOINT = "llama-3-1-8b"
 
         # Prepare the payload for SageMaker
         payload = json.dumps({
@@ -148,7 +154,7 @@ if vector_store._collection.count() == 0:  # Check if the vector store is empty
 else:
     print("Vector store already contains data, skipping document addition.")
 # Step 7: Set up the LLM (Ollama)
-llm = OllamaLLM(model="llama3")
+# llm = OllamaLLM(model="llama3")
 
 
 prompt_template = """
@@ -248,7 +254,7 @@ You are a state-of-the-art sales assistant for Speaker Selling. Based on the cus
     // Repeat for "Better" and "Best" budget tiers
   ]
 }}
-** NOTE : MAKE SURE NO TEXT IS RESPONDED UNDER JSON OUTPUT**
+** NOTE : MAKE SURE NO TEXT IS RESPONDED UNDER JSON OUTPUT. THE FINAL OUTPUT SHOULD BE ONLY VALID JSON**
 """
 # Step 10: Create a function to process queries
 
@@ -278,7 +284,7 @@ def send_html_email(recipient, subject, body_html, aws_region="eu-north-1"):
         print(f"Error: {e}")
 
 
-llm = OllamaLLM(model="llama3")
+# llm = OllamaLLM(model="llama3")
 
 
 def process_query(query, budget):
@@ -295,42 +301,60 @@ def process_query(query, budget):
     # Format the retrieved documents into a string
     available_products = '\n'.join([doc.page_content for doc in relevant_docs])
 
-    prompt = ChatPromptTemplate.from_template(prompt_template)
+    # prompt = ChatPromptTemplate.from_template(prompt_template)
 
-    chain = prompt | llm
+    # chain = prompt | llm
 
-    answer = chain.invoke({
-        "client_name": query["client_name"],
-        "client_address": query["client_address"],
-        "email": query["email"],
-        "type_of_build": query["type_of_build"],
-        "requirements": room_requirements_,
-        "budget": budget,
-        "available_products": available_products
-    })
+    # answer = chain.invoke({
+    #     "client_name": query["client_name"],
+    #     "client_address": query["client_address"],
+    #     "email": query["email"],
+    #     "type_of_build": query["type_of_build"],
+    #     "requirements": room_requirements_,
+    #     "budget": budget,
+    #     "available_products": available_products
+    # })
 
-    prompt = ChatPromptTemplate.from_template(response_cleaning_template)
-    chain = prompt | llm
+    # prompt = ChatPromptTemplate.from_template(response_cleaning_template)
+    # chain = prompt | llm
 
-    json_response = chain.invoke({
-        "response": answer
-    })
+    # json_response = chain.invoke({
+    #     "response": answer
+    # })
 
-    print(json_response)
+    # print(json_response)
 
     # Prepare the input text for SageMaker
-    # prompt_input = prompt_template.format(
-    #     client_name=query["client_name"],
-    #     client_address=query["client_address"],
-    #     email=query["email"],
-    #     type_of_build=query["type_of_build"],
-    #     requirements=room_requirements_,
-    #     budget=budget,
-    #     available_products=available_products
-    # )
+    prompt_input = prompt_template.format(
+        client_name=query["client_name"],
+        client_address=query["client_address"],
+        email=query["email"],
+        type_of_build=query["type_of_build"],
+        requirements=room_requirements_,
+        budget=budget,
+        available_products=available_products
+    )
+
+    completion = gptClient.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a state-of-the-art sales assistant for Speaker Selling. Based on the customer's requirements, budget, and room specifications, generate a detailed sales quotation that includes three tiers: Good, Better, and Best. . Only return a valid JSON output."},
+            {
+                "role": "user",
+                "content": prompt_input
+            },
+            {
+                "role": "assistant",
+                "content":  "Respond only with valid JSON data. Do not include any extra text, explanations, or formatting like triple backticks or any markdown."
+            }
+        ]
+    )
+
+    answer = completion.choices[0].message.content
 
     # Invoke SageMaker model for the response
     # answer = invoke_sagemaker_model(prompt_input)
+    # print(answer)
     # print(f"Found initial response: {answer}")
 
     # if answer:
@@ -340,8 +364,7 @@ def process_query(query, budget):
     #     cleaned_response = invoke_sagemaker_model(prompt_cleaning_input)
 
     #     if cleaned_response:
-    json_response = json.loads(json_response)
-    print("FOUND JSON", json_response)
+    json_response = json.loads(answer)
     # Load JSON data
     data = json_response
 
@@ -357,14 +380,15 @@ def process_query(query, budget):
                              client_email=data['client_email'],
                              client_address=data['client_address'],
                              type_of_build=data['type_of_build'],
-                             budgets=data['budgets'])
+                             budgets=data['budgets'],
+                             budget=budget
+                             )
 
     send_html_email(
         query['email'], "Sales Quote for Home Automation", output)
     return json_response
 
 
-load_dotenv()
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.PROJECT_VERSION)
 
 

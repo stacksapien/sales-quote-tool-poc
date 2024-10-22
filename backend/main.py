@@ -32,8 +32,8 @@ from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 
 def invoke_sagemaker_model(input_text):
     try:
-        sagemaker_client = boto3.client('sagemaker-runtime', region_name="us-east-1", aws_access_key_id=os.getenv(
-            'AWS_ACCESS_KEY'), aws_secret_access_key=os.getenv('AWS_SECRET_KEY'))
+        sagemaker_client = boto3.client(
+            'sagemaker-runtime', region_name="us-east-1")
 
 # Define the SageMaker endpoint
         SAGEMAKER_ENDPOINT = "jumpstart-dft-llama-3-1-8b-instruct-20241017-231713"
@@ -152,29 +152,49 @@ llm = OllamaLLM(model="llama3")
 
 
 prompt_template = """
-You are a state-of-the-art sales assistant for Speaker Selling. Based on the customer's requirements for all rooms and the current budget tier, generate a detailed sales quotation.
+You are a state-of-the-art sales assistant for Speaker Selling. Based on the customer's requirements, budget, and room specifications, generate a detailed sales quotation that includes three tiers: Good, Better, and Best.
 
 **Customer Details**:
 - **Name**: {client_name}
 - **Email**: {email}
 - **Address**: {client_address}
 - **Type of Build**: {type_of_build}
-
-**Room Requirements**:
-{requirements}
-
-**Budget**: {budget}
-**Budget Tier**: {budget_tier}
+- **Requirements**: {requirements}
+- **Budget**: {budget}
 
 **Available Products**:
 {available_products}
 
+**Budget Tiers**:
+
+- **Good**:
+  - Recommend essential products that meet the minimum requirements while strictly staying within the budget.
+  - Ensure the product type matches the room requirements, especially for wall-mounted speakers or specific configurations.
+  - Carefully review the long descriptions to identify products with the necessary features.
+
+- **Better**:
+  - Provide cost-effective options that enhance quality and functionality.
+  - Consider higher-rated (rating) products and balance cost with budget.
+  - Calculate and suggest the correct quantity of speakers needed for each room based on room size and acoustic needs.
+  - Ensure the total cost fits within the budget.
+  - Thoroughly check long descriptions and product category, sub-category and type of product to ensure feature requirements.
+
+- **Best**:
+  - Offer the best available products that maximize quality and features.
+  - Include top-rated (High Rating) items optimal setup.
+  - Calculate and suggest the correct quantity of speakers needed for each room based on room size and acoustic needs.
+  - It's acceptable if the total cost slightly exceeds the budget (Budget can exceed by 20-30%) to provide significant value.
+  - Carefully match product types and ratings to the customer's requirements, especially for specialized needs.
+  - Thoroughly check long descriptions and product category, sub-category and type to include products with advanced features.
+
 **Instructions**:
 
-1. **Pricing**: Use only the unit prices provided in the available products list.
+1. **Pricing**: Use only the unit prices provided in the available products list. Do not assume or estimate prices.
 2. **Product Selection**:
-   - Recommend appropriate product(s) for each room.
-   - Ensure the quantity matches the room size and customer's usage requirements.
+   - For each room, recommend the most appropriate product(s) from the catalog.
+   - Ensure the quantity of speakers matches the room size and customer's usage requirements. If no quantity of speaker is provided assume best scenario of number of speaker required for that room.
+   - Pay special attention to the type (e.g., floor, wall, ceiling, hidden) of speakers from product catalog and ratings provided in product catalog of the speakers to meet specific room needs.
+   - Review the long descriptions to verify that the products have the required features and it meets the product type requirements for room.
 3. **Product Details**:
    - Provide comprehensive information for each product, including:
      - Name
@@ -187,40 +207,61 @@ You are a state-of-the-art sales assistant for Speaker Selling. Based on the cus
      - Long Description
      - Quantity
      - Unit Price
-     - Reason
-4. **Output Format**:
-   - Output the final result in the exact structured JSON format provided below.
-   - Ensure the JSON is valid and does not include any additional text.
+     - Reason (Provide reasoning for selection)
+4. **Out of Budget**:
+   - If no available product fits a room's requirement within the budget, list "Not Recommended (Out of Budget)" for that room in the respective budget tier.
+5. **Output Format**:
+   - Output the final result in the exact structured JSON format provided in section **Output JSON Structure** for all three budget tiers.
+   - Ensure the JSON is valid and can be used directly for processing without any extra additional text or explanations other then JSON requested.
 
 **Output JSON Structure**:
 {{
-  "rooms": {{
-    "{room_name}": {{
-      "products": [
-        {{
-          "name": "Product Name",
-          "part_number": "Part Number",
-          "category": "Category",
-          "subcategory": "Subcategory",
-          "type": "Type",
-          "rating": "Rating",
-          "short_description": "Short Description",
-          "long_description": "Long Description",
-          "quantity": "Quantity",
-          "unit_price": "Unit Price",
-          "reason": "Reason for selection"
+  "client_name": "Customer Name",
+  "client_email": "Customer Email",
+  "client_address": "Customer Address",
+  "type_of_build": "Customer's requested build (e.g., New Build, Condo, Retrofit)",
+  "budgets": [
+    {{
+      "type": "Good",
+      "rooms": {{
+        "Room Name": {{
+          "requirement": "Requirement (e.g., Wall, Ceiling, Floor, Hidden or Number of Speakers type)",
+          "products": [
+            {{
+              "name": "Product Name",
+              "part_number": "Part Number",
+              "category": "Category",
+              "subcategory": "Subcategory",
+              "type": "Type",
+              "rating": "Rating",
+              "short_description": "Short Description",
+              "long_description": "Long Description",
+              "quantity": "Quantity",
+              "unit_price": "Unit Price",
+              "reason": "Reason for selection if not an exact match"
+            }}
+          ]
         }}
-      ]
-    }}
-  }}
+        // Repeat for each room
+      }}
+    }},
+    // Repeat for "Better" and "Best" budget tiers
+  ]
 }}
-**NOTE: ONLY OUTPUT THE JSON RESPONSE.**
+** NOTE : MAKE SURE NO TEXT IS RESPONDED UNDER JSON OUTPUT**
+"""
+# Step 10: Create a function to process queries
+
+response_cleaning_template = """
+You are an assistant that only outputs valid JSON without any additional text.
+Extract the following information from the text and output it as valid formatted JSON:
+
+{response}
 """
 
 
 def send_html_email(recipient, subject, body_html, aws_region="eu-north-1"):
-    ses_client = boto3.client('ses', region_name=aws_region, aws_access_key_id=os.getenv(
-        'AWS_ACCESS_KEY'), aws_secret_access_key=os.getenv('AWS_SECRET_KEY'))
+    ses_client = boto3.client('ses', region_name=aws_region)
     try:
         response = ses_client.send_email(
             Source=os.getenv('SES_EMAIL'),
@@ -238,92 +279,46 @@ def send_html_email(recipient, subject, body_html, aws_region="eu-north-1"):
 
 
 def process_query(query, budget):
-    # Extract client details
-    client_details = {
-        "client_name": query.get("client_name"),
-        "client_address": query.get("client_address"),
-        "email": query.get("email"),
-        "type_of_build": query.get("type_of_build")
-    }
+    relevant_keywords = json.dumps(query)
+    room_requirements = "\n".join(
+        [f"{products}" for room, products in query.items() if room not in ["client_name", "client_address", "type_of_build", "budget", "email", "timestamp"] and products is not None])
 
-    # Initialize the final JSON structure
-    final_output = {
-        "client_name": client_details["client_name"],
-        "client_email": client_details["email"],
-        "client_address": client_details["client_address"],
-        "type_of_build": client_details["type_of_build"],
-        "budgets": []
-    }
+    room_requirements_ = "\n".join(
+        [f"- In **{room}**: Following type of speaker are needed to be installed : {products}" for room, products in query.items() if room not in ["client_name", "client_address", "type_of_build", "budget", "email", "timestamp"] and products is not None])
 
-    # Define budget tiers
-    budget_tiers = ["Good", "Better", "Best"]
+    # Retrieve relevant documents from the vector store
+    relevant_docs = vector_store.similarity_search(room_requirements, k=5)
 
-    for tier in budget_tiers:
-        tier_data = {
-            "type": tier,
-            "rooms": {}
-        }
+    # Format the retrieved documents into a string
+    available_products = '\n'.join([doc.page_content for doc in relevant_docs])
 
-        room_requirements_list = []
-        available_products_list = []
-
-        for room, requirement in query.items():
-            if room in ["client_name", "client_address", "type_of_build", "budget", "email", "timestamp"] or not requirement:
-                continue
-
-            room_requirements = f"{requirement}"
-            relevant_docs = vector_store.similarity_search(
-                room_requirements, k=3)
-
-            # Format the retrieved documents into a string
-            available_products = '\n'.join(
-                [doc.page_content for doc in relevant_docs])
-
-            room_requirements_list.append(f"In **{room}**: {requirement}")
-            available_products_list.append(available_products)
-
-        # Combine room requirements and available products for the current budget tier
-        combined_room_requirements = '\n'.join(room_requirements_list)
-        combined_available_products = '\n'.join(available_products_list)
-
-        # Prepare the input text for SageMaker
-        prompt_input = prompt_template.format(
-            client_name=client_details["client_name"],
-            client_address=client_details["client_address"],
-            email=client_details["email"],
-            type_of_build=client_details["type_of_build"],
-            requirements=combined_room_requirements,
-            budget=budget,
-            room_name=room,
-            available_products=combined_available_products,
-            budget_tier=tier
-        )
-
-        # Invoke SageMaker model for the response
-        answer = invoke_sagemaker_model(prompt_input)
-
-        if answer:
-            try:
-                json_response = json.loads(answer)
-                tier_data["rooms"] = json_response["rooms"]
-            except json.JSONDecodeError as e:
-                print(f"JSON decode error: {e}")
-                continue  # Implement retry logic here if needed
-
-        final_output["budgets"].append(tier_data)
-
-    # After processing all rooms and tiers, send the email
-    # Render the template with dynamic data
-    print(json.dumps(final_output))
-    output_html = render_html_template(final_output)
-
-    send_html_email(
-        client_details['email'], "Sales Quote for Home Automation", output_html
+    # Prepare the input text for SageMaker
+    prompt_input = prompt_template.format(
+        client_name=query["client_name"],
+        client_address=query["client_address"],
+        email=query["email"],
+        type_of_build=query["type_of_build"],
+        requirements=room_requirements_,
+        budget=budget,
+        available_products=available_products
     )
-    return final_output
 
+    # Invoke SageMaker model for the response
+    answer = invoke_sagemaker_model(prompt_input)
+    # print(f"Found initial response: {answer}")
 
-def render_html_template(data):
+    # if answer:
+    #     # Clean and parse the response
+    #     prompt_cleaning_input = response_cleaning_template.format(
+    #         response=answer)
+    #     cleaned_response = invoke_sagemaker_model(prompt_cleaning_input)
+
+    #     if cleaned_response:
+    json_response = json.loads(answer)
+    print("FOUND JSON", json_response)
+    # Load JSON data
+    data = json_response
+
     # Setup Jinja2 environment
     file_loader = FileSystemLoader('.')
     env = Environment(loader=file_loader)
@@ -332,14 +327,15 @@ def render_html_template(data):
     template = env.get_template('template.html')
 
     # Render the template with dynamic data
-    output = template.render(
-        client_name=data['client_name'],
-        client_email=data['client_email'],
-        client_address=data['client_address'],
-        type_of_build=data['type_of_build'],
-        budgets=data['budgets']
-    )
-    return output
+    output = template.render(client_name=data['client_name'],
+                             client_email=data['client_email'],
+                             client_address=data['client_address'],
+                             type_of_build=data['type_of_build'],
+                             budgets=data['budgets'])
+
+    send_html_email(
+        query['email'], "Sales Quote for Home Automation", output)
+    return json_response
 
 
 load_dotenv()

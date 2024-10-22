@@ -5,6 +5,9 @@
 
 *.sqlite3
 
+*.bin
+.bin
+
 backend/db/**
 # Byte-compiled / optimized / DLL files
 __pycache__/

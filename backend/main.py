@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 import boto3
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 from openai import OpenAI
+import time
 
 
 load_dotenv()
@@ -175,17 +176,17 @@ You are a state-of-the-art sales assistant for Speaker Selling. Based on the cus
 
 - **Good**:
   - Recommend essential products that meet the minimum requirements within the budget. If required, exceed the budget slightly to ensure basic functionality and quality.
-  - Choose products rated 1 to 3 to optimize cost while meeting the essential features.
+  - Choose products rated 4 only to optimize cost while meeting the essential features.
   - Match products to room requirements (e.g., wall-mounted speakers or specific configurations).
   - Review long descriptions to verify compatibility with the requirements.
 
 - **Better**:
   - Provide higher-quality products that improve functionality and coverage while staying as close to the budget as possible.
-  - Use products rated 3 and above for better sound quality, durability, and coverage, especially for larger rooms.
+  - Use products rated 5 only for better sound quality, durability, and coverage, especially for larger rooms.
   - Balance quality with cost, stretching the budget if necessary to meet requirements.
 
 - **Best**:
-  - Offer top-tier products (rated 4 and 5) for the best possible quality and coverage, even if it exceeds the budget significantly.
+  - Offer top-tier products rated 6 and above for the best possible quality and coverage, even if it exceeds the budget significantly.
   - Provide an optimal setup with ample quantities of speakers for superior performance and coverage.
   - Ensure advanced features and top performance, especially for specialized needs like high-ceiling rooms or specific acoustics.
   - Carefully review long descriptions to verify each product's advanced features and match to the customer's needs.
@@ -270,106 +271,82 @@ def send_html_email(recipient, subject, body_html, aws_region="eu-north-1"):
 
 
 def process_query(query, budget):
-    relevant_keywords = json.dumps(query)
-    room_requirements = "\n".join(
-        [f"{products}" for room, products in query.items() if room not in ["client_name", "client_address", "type_of_build", "budget", "email", "timestamp"] and products is not None])
+    for attempt in range(3):  # Retry up to 3 times
+        try:
+            relevant_keywords = json.dumps(query)
+            room_requirements = "\n".join(
+                [f"{products}" for room, products in query.items() if room not in [
+                    "client_name", "client_address", "type_of_build", "budget", "email", "timestamp"] and products is not None]
+            )
 
-    room_requirements_ = "\n".join(
-        [f"- In **{room}**: Following type of speaker are needed to be installed : {products}" for room, products in query.items() if room not in ["client_name", "client_address", "type_of_build", "budget", "email", "timestamp"] and products is not None])
+            room_requirements_ = "\n".join(
+                [f"- In **{room}**: Following type of speaker are needed to be installed : {products}" for room, products in query.items(
+                ) if room not in ["client_name", "client_address", "type_of_build", "budget", "email", "timestamp"] and products is not None]
+            )
 
-    # Retrieve relevant documents from the vector store
-    relevant_docs = vector_store.similarity_search(room_requirements, k=5)
+            # Retrieve relevant documents from the vector store
+            relevant_docs = vector_store.similarity_search(
+                room_requirements, k=5)
 
-    # Format the retrieved documents into a string
-    available_products = '\n'.join([doc.page_content for doc in relevant_docs])
+            # Format the retrieved documents into a string
+            available_products = '\n'.join(
+                [doc.page_content for doc in relevant_docs])
 
-    # prompt = ChatPromptTemplate.from_template(prompt_template)
+            # Prepare the input text for SageMaker
+            prompt_input = prompt_template.format(
+                client_name=query["client_name"],
+                client_address=query["client_address"],
+                email=query["email"],
+                type_of_build=query["type_of_build"],
+                requirements=room_requirements_,
+                budget=budget,
+                available_products=available_products
+            )
 
-    # chain = prompt | llm
+            completion = gptClient.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "You are a state-of-the-art sales assistant for Speaker Selling. Based on the customer's requirements, budget, and room specifications, generate a detailed sales quotation that includes three tiers: Good, Better, and Best. Only return a valid JSON output."},
+                    {"role": "user", "content": prompt_input},
+                    {"role": "assistant", "content": "Respond only with valid JSON data. Do not include any extra text, explanations, or formatting like triple backticks or any markdown."}
+                ]
+            )
 
-    # answer = chain.invoke({
-    #     "client_name": query["client_name"],
-    #     "client_address": query["client_address"],
-    #     "email": query["email"],
-    #     "type_of_build": query["type_of_build"],
-    #     "requirements": room_requirements_,
-    #     "budget": budget,
-    #     "available_products": available_products
-    # })
+            answer = completion.choices[0].message.content
 
-    # prompt = ChatPromptTemplate.from_template(response_cleaning_template)
-    # chain = prompt | llm
+            # Convert the response to JSON
+            json_response = json.loads(answer)
 
-    # json_response = chain.invoke({
-    #     "response": answer
-    # })
+            # Setup Jinja2 environment
+            file_loader = FileSystemLoader('.')
+            env = Environment(loader=file_loader)
 
-    # print(json_response)
+            # Load the template
+            template = env.get_template('template.html')
 
-    # Prepare the input text for SageMaker
-    prompt_input = prompt_template.format(
-        client_name=query["client_name"],
-        client_address=query["client_address"],
-        email=query["email"],
-        type_of_build=query["type_of_build"],
-        requirements=room_requirements_,
-        budget=budget,
-        available_products=available_products
-    )
+            # Render the template with dynamic data
+            output = template.render(client_name=json_response['client_name'],
+                                     client_email=json_response['client_email'],
+                                     client_address=json_response['client_address'],
+                                     type_of_build=json_response['type_of_build'],
+                                     budgets=json_response['budgets'],
+                                     budget=budget
+                                     )
 
-    completion = gptClient.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are a state-of-the-art sales assistant for Speaker Selling. Based on the customer's requirements, budget, and room specifications, generate a detailed sales quotation that includes three tiers: Good, Better, and Best. . Only return a valid JSON output."},
-            {
-                "role": "user",
-                "content": prompt_input
-            },
-            {
-                "role": "assistant",
-                "content":  "Respond only with valid JSON data. Do not include any extra text, explanations, or formatting like triple backticks or any markdown."
-            }
-        ]
-    )
+            # Send email with generated HTML content
+            send_html_email(
+                query['email'], "Sales Quote for Home Automation", output
+            )
 
-    answer = completion.choices[0].message.content
+            return json_response
 
-    # Invoke SageMaker model for the response
-    # answer = invoke_sagemaker_model(prompt_input)
-    # print(answer)
-    # print(f"Found initial response: {answer}")
-
-    # if answer:
-    #     # Clean and parse the response
-    #     prompt_cleaning_input = response_cleaning_template.format(
-    #         response=answer)
-    #     cleaned_response = invoke_sagemaker_model(prompt_cleaning_input)
-
-    #     if cleaned_response:
-    print(answer)
-    json_response = json.loads(answer)
-    # Load JSON data
-    data = json_response
-
-    # Setup Jinja2 environment
-    file_loader = FileSystemLoader('.')
-    env = Environment(loader=file_loader)
-
-    # Load the template
-    template = env.get_template('template.html')
-
-    # Render the template with dynamic data
-    output = template.render(client_name=data['client_name'],
-                             client_email=data['client_email'],
-                             client_address=data['client_address'],
-                             type_of_build=data['type_of_build'],
-                             budgets=data['budgets'],
-                             budget=budget
-                             )
-
-    send_html_email(
-        query['email'], "Sales Quote for Home Automation", output)
-    return json_response
+        except Exception as e:
+            print(f"Attempt {attempt + 1} failed with error: {e}")
+            if attempt < 2:  # Wait before retrying, if not on the last attempt
+                time.sleep(4)
+            else:
+                print("All attempts failed.")
+                raise  # Raise the exception if all attempts fail
 
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.PROJECT_VERSION)

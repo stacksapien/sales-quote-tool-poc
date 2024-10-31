@@ -22,6 +22,7 @@
 
       {% for budget in budgets %}
       <h2>{{ budget.type }}</h2>
+      <h4>Total : {{ budget.total }}</h4>
       {% for room, details in budget.rooms.items() %}
       <h4>{{ room }} - Requirement: {{ details.requirement }}</h4>
       <table class="table table-bordered">

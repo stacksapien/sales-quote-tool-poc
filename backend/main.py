@@ -222,6 +222,7 @@ You are a state-of-the-art sales assistant for Speaker Selling. Based on the cus
   "budgets": [
     {{
       "type": "Good",
+      "total" : "Sum of Unit Price of all Products inside the tier",
       "rooms": {{
         "Room Name": {{
           "requirement": "Requirement",

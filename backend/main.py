@@ -27,6 +27,7 @@ import boto3
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 from openai import OpenAI
 import time
+import pandas as pd
 
 
 load_dotenv()
@@ -110,6 +111,13 @@ loader = CSVLoader(file_path="./product_catalog.csv")
 
 data = loader.load()
 
+product_catalog = pd.read_csv("./product_catalog.csv")
+
+# Select and format only the required columns
+product_list = product_catalog[['Model', 'Manufacturer', 'Subcategory', 'Part Number', 'Unit Price', 'Rating']].apply(
+    lambda row: f"{row['Model']} by {row['Manufacturer']} ({row['Subcategory']}): Part Number {row['Part Number']}, Unit Price ${row['Unit Price']}, Rating {row['Rating']}",
+    axis=1
+).tolist()
 
 # Step 3: Split text into manageable chunks
 text_splitter = RecursiveCharacterTextSplitter(
@@ -140,14 +148,16 @@ batch_size = 500  # Adjust this based on your model's batch size limits
 # Check if the vector store collection exists and contains data
 # (Assuming the collection's count method returns the number of documents)
 if vector_store._collection.count() == 0:  # Check if the vector store is empty
-    print("Vector store is empty, adding documents.")
+
     # Split the documents into smaller batches
-    for i in range(0, len(docs), batch_size):
-        batch_docs = docs[i:i + batch_size]
-        vector_store.add_documents(batch_docs)
+    # for i in range(0, len(docs), batch_size):
+    #     batch_docs = docs[i:i + batch_size]
+    #     vector_store.add_documents(batch_docs)
 
     try:
 
+        print("Vector store is empty, adding documents.")
+        vector_store.add_documents(docs)
         vector_store.persist()  # Save the new vector store
     except:
         print("Deprecated API Call found")
@@ -158,6 +168,7 @@ else:
 # llm = OllamaLLM(model="llama3")
 
 
+# Define the prompt with placeholders
 prompt_template = """
 You are a state-of-the-art sales assistant for Speaker Selling. Based on the customer's requirements, budget, and room specifications, generate a detailed sales quotation that includes three tiers: Good, Better, and Best.
 
@@ -175,29 +186,30 @@ You are a state-of-the-art sales assistant for Speaker Selling. Based on the cus
 **Budget Tiers**:
 
 - **Good**:
-  - Choose products with a **Rating of 4**. Only products that have a rating of 4 should be in this tier.
-  - Ensure that the selected products match the **Type**, **Subcategory**.
+  - Choose products with a **Rating of 4. Only products that have a rating of 4 only in this tier.
+  - Ensure that the selected products match the **Subcategory**.
   - Exceed the budget if necessary to meet the requirements.
   
 - **Better**:
-  - Provide high-quality products that enhance functionality and coverage, staying close to the budget.
-  - Ensure that the products match the **Type**, **Subcategory**.
+  - Choose products with a **Rating of 5. Only products that have a rating of 5 only in this tier.
+  - Ensure that the products match the **Subcategory**.
   - Exceed the budget if necessary to meet the requirements.
 
 - **Best**:
-  - Choose products with a **Rating of 6**. Only products that have a rating of 6 should be in this tier.
-  - Ensure that products in this tier match the **Type**, **Subcategory**
+  - Choose products with a **Rating of 6. Only products that have a rating of 6 should be in this tier.
+  - Ensure that products in this tier match the **Subcategory**
   - Exceed the budget if necessary to meet the requirements.
 
 **Instructions**:
 
 1. **Pricing**: Use only the unit prices provided in the available products list.
 2. **Product Selection**:
-   - For each room, recommend products that matches the **Type**, **Subcategory**.
-   - Prioritize matching the **Type** and **Subcategory** fields
+   - For each room, recommend products that matches the **Subcategory** provided in product list for the speaker.
+   - Prioritize matching the **Subcategory** fields
+   - Prioritize matching the **Rating** fields
 3. **Product Details**:
    - Include comprehensive information for each product:
-     - Name, Part Number, Category, Subcategory, Type, Rating, Short Description, Long Description, Quantity, Unit Price, Reason for selection.
+     - Name, Part Number, Category, Subcategory, Rating, Quantity, Unit Price, Reason for selection.
 4. **Output Format**:
    - The final output should be in valid JSON format without additional text or explanations.
 
@@ -215,11 +227,10 @@ You are a state-of-the-art sales assistant for Speaker Selling. Based on the cus
           "requirement": "Requirement",
           "products": [
             {{
-              "name": "Product Name",
-              "part_number": "Part Number",
+              "name": "Manufacturer",
+              "part_number": "Model",
               "category": "Category",
               "subcategory": "Subcategory",
-              "type": "Type",
               "rating": "Rating",
               "short_description": "Short Description",
               "long_description": "Long Description",
@@ -271,25 +282,30 @@ def send_html_email(recipient, subject, body_html, aws_region="eu-north-1"):
 def process_query(query, budget):
     for attempt in range(3):  # Retry up to 3 times
         try:
-            relevant_keywords = json.dumps(query)
             room_requirements = "\n".join(
                 [f"{products}" for room, products in query.items() if room not in [
                     "client_name", "client_address", "type_of_build", "budget", "email", "timestamp"] and products is not None]
             )
 
             room_requirements_ = "\n".join(
-                [f"- In **{room}**: Following type of speaker are needed to be installed : {products}" for room, products in query.items(
+                [f"- In **{room}**: **Speakers Sub-category** : {products}" for room, products in query.items(
+                ) if room not in ["client_name", "client_address", "type_of_build", "budget", "email", "timestamp"] and products is not None]
+            )
+
+            keyword_search = "\n".join(
+                [f"{products}" for room, products in query.items(
                 ) if room not in ["client_name", "client_address", "type_of_build", "budget", "email", "timestamp"] and products is not None]
             )
 
             # Retrieve relevant documents from the vector store
             relevant_docs = vector_store.similarity_search(
-                room_requirements, k=5)
+                keyword_search, k=5)
 
             # Format the retrieved documents into a string
-            available_products = '\n'.join(
-                [doc.page_content for doc in relevant_docs])
+            # available_products = '\n**Product**'.join(
+            #     [doc.page_content for doc in relevant_docs])
 
+            available_products = "\n".join(product_list)
             # Prepare the input text for SageMaker
             prompt_input = prompt_template.format(
                 client_name=query["client_name"],
